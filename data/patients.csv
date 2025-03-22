@@ -1,0 +1,11 @@
+id,name,surname,date_of_birth,room_number,responsible_person_id
+1,Alice,Garcia,1975-05-15,101,1
+2,Bob,Miller,1982-08-22,102,2
+3,Charlie,Davis,1968-03-10,103,3
+4,Diana,Rodriguez,1990-11-28,201,1
+5,Edward,Martinez,1955-07-04,202,4
+6,Fiona,Anderson,1972-01-19,203,5
+7,George,Thomas,1988-09-02,301,2
+8,Helen,Jackson,1960-12-25,302,3
+9,Ian,White,1995-04-08,303,4
+10,Julia,Harris,1980-06-17,304,5
