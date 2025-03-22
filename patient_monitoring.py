@@ -3,6 +3,7 @@ import time
 import datetime
 import csv
 import os
+import serial
 from dataclasses import dataclass
 from typing import List, Dict
 
@@ -33,6 +34,70 @@ class VitalSigns:
     temperature: float  # °C
     oxygen_saturation: int  # %
     respiratory_rate: int  # breaths per minute
+
+# Serial SMS Engine to communicate with GSM modem
+class SMSEngine:
+    def __init__(self):
+        self.port = None
+        
+    def open_port(self, port_name):
+        try:
+            self.port = serial.Serial(
+                port=port_name,
+                baudrate=115200,
+                timeout=1,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS
+            )
+            return True
+        except Exception as ex:
+            print(f"Error opening port: {ex}")
+            return False
+    
+    def close_port(self):
+        if self.port and self.port.is_open:
+            self.port.close()
+            
+    def send_sms(self, phone_number, message):
+        if not self.port or not self.port.is_open:
+            print("Serial port is not open")
+            return False
+        
+        try:
+            # Initialize the modem
+            self.port.write(b'AT\r\n')
+            time.sleep(0.2)
+            
+            # Set SMS text mode
+            self.port.write(b'AT+CMGF=1\r\n')
+            time.sleep(0.2)
+            
+            # Set GSM character set
+            self.port.write(b'AT+CSCS="GSM"\r\n')
+            time.sleep(0.2)
+            
+            # Set the destination phone number
+            self.port.write(f'AT+CMGS="{phone_number}"\r\n'.encode())
+            time.sleep(0.2)
+            
+            # Send the message and the Ctrl+Z character (ASCII 26)
+            self.port.write(f'{message}\x1A'.encode())
+            time.sleep(1)
+            
+            # Read response
+            response = self.port.read(self.port.in_waiting)
+            
+            if b'OK' in response:
+                print(f"SMS sent successfully to {phone_number}")
+                return True
+            else:
+                print(f"Failed to send SMS: {response}")
+                return False
+                
+        except Exception as ex:
+            print(f"Error sending SMS: {ex}")
+            return False
     
 # Create a list of responsible persons (doctors)
 responsible_persons = [
@@ -144,15 +209,25 @@ def simulate_blood_pressure(patient_id: int) -> tuple:
     
     # Ensure diastolic is always lower than systolic
     while diastolic >= systolic:
-        diastolic = max(60, diastolic - 10)
+        diastolic = max(10, diastolic - 10)
     
     return systolic, diastolic
 
-# Function to monitor blood pressure and generate alerts
-def monitor_blood_pressure(duration_minutes=5, interval_seconds=60):
+# Function to monitor blood pressure and generate alerts with SMS notifications
+def monitor_blood_pressure(duration_minutes=5, interval_seconds=20, com_port=None):
     print("\n--- Blood Pressure Monitoring Alert System ---")
     print("Monitoring started. Press Ctrl+C to stop.")
     print("-" * 70)
+    
+    # Initialize SMS engine if port is provided
+    sms_engine = None
+    if com_port:
+        sms_engine = SMSEngine()
+        if sms_engine.open_port(com_port):
+            print(f"Successfully connected to GSM modem on {com_port}")
+        else:
+            print(f"Failed to connect to GSM modem. SMS notifications will be disabled.")
+            sms_engine = None
     
     iteration = 0
     start_time = datetime.datetime.now()
@@ -168,24 +243,54 @@ def monitor_blood_pressure(duration_minutes=5, interval_seconds=60):
                 systolic, diastolic = simulate_blood_pressure(patient.id)
                 all_readings.append((patient, systolic, diastolic))
                 
-                # Check for hypertension conditions
+                doctor = patient.responsible_person
+                
+                # Check for hypertension conditions and send alerts
                 if 160 <= systolic <= 179 and 100 <= diastolic <= 109:
-                    doctor = patient.responsible_person
-                    print(f"\n🚨 MODERATE HYPERTENSION ALERT 🚨")
-                    print(f"Patient: {patient.name} {patient.surname} (ID: {patient.id})")
-                    print(f"Blood Pressure: {systolic}/{diastolic} mmHg")
+                    alert_message = (
+                        f"MODERATE HYPERTENSION ALERT\n"
+                        f"Patient: {patient.name} {patient.surname} (ID: {patient.id})\n"
+                        f"Blood Pressure: {systolic}/{diastolic} mmHg\n"
+                        f"Action: See a doctor or GP as soon as possible"
+                    )
+                    
+                    print(f"\n🚨 {alert_message}")
                     print(f"Doctor: {doctor.name} {doctor.surname}")
                     print(f"Contact: {doctor.phone_number}")
-                    print(f"Action: See a doctor or GP as soon as possible")
+                    
+                    # Send SMS if SMS engine is available
+                    if sms_engine:
+                        sms_sent = sms_engine.send_sms(
+                            doctor.phone_number, 
+                            alert_message
+                        )
+                        if sms_sent:
+                            print("SMS alert sent successfully")
+                        else:
+                            print("Failed to send SMS alert")
                     
                 elif systolic >= 180 and diastolic >= 110:
-                    doctor = patient.responsible_person
-                    print(f"\n🚑 HYPERTENSIVE EMERGENCY ALERT 🚑")
-                    print(f"Patient: {patient.name} {patient.surname} (ID: {patient.id})")
-                    print(f"Blood Pressure: {systolic}/{diastolic} mmHg")
+                    alert_message = (
+                        f"HYPERTENSIVE EMERGENCY ALERT\n"
+                        f"Patient: {patient.name} {patient.surname} (ID: {patient.id})\n"
+                        f"Blood Pressure: {systolic}/{diastolic} mmHg\n"
+                        f"Action: Requires immediate medical attention. Go to hospital."
+                    )
+                    
+                    print(f"\n🚑 {alert_message}")
                     print(f"Doctor: {doctor.name} {doctor.surname}")
                     print(f"Contact: {doctor.phone_number}")
-                    print(f"Action: Requires immediate medical attention. Go to hospital.")
+                    
+                    # Send SMS if SMS engine is available
+                    if sms_engine:
+                        sms_sent = sms_engine.send_sms(
+                            doctor.phone_number, 
+                            alert_message
+                        )
+                        if sms_sent:
+                            print("SMS alert sent successfully")
+                        else:
+                            print("Failed to send SMS alert")
             
             # Print a summary of all readings
             print("\nCurrent readings:")
@@ -203,6 +308,11 @@ def monitor_blood_pressure(duration_minutes=5, interval_seconds=60):
                 
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
+    finally:
+        # Close the serial port if it was opened
+        if sms_engine:
+            sms_engine.close_port()
+            print("Serial port closed")
     
     print("\nBlood pressure monitoring completed.")
 
@@ -304,12 +414,16 @@ if __name__ == "__main__":
     # Display all responsible persons
     print_responsible_persons()
     
-    # Save data to CSV files
-    save_patients_to_csv("data/patients.csv")
-    save_responsible_persons_to_csv("data/responsible_persons.csv")
+    # Specify COM port for GSM modem (change as needed)
+    # Examples: 'COM3' on Windows, '/dev/ttyUSB0' on Linux, '/dev/tty.usbserial' on macOS
+    gsm_port = 'COM3'  # Change this to your actual COM port
     
-    # Run the blood pressure monitoring system
-    monitor_blood_pressure(duration_minutes=5, interval_seconds=60)
+    # Save data to CSV files (commented out to avoid overwriting)
+    #save_patients_to_csv("data/patients.csv")
+    #save_responsible_persons_to_csv("data/responsible_persons.csv")
+    
+    # Run the blood pressure monitoring system with SMS notifications
+    monitor_blood_pressure(duration_minutes=5, interval_seconds=20, com_port=gsm_port)
     
     # Alternatively, to run the original simulation:
     # vital_signs_data = monitor_patients(iterations=3, interval=1)
