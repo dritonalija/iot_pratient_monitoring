@@ -33,8 +33,8 @@ def receive_sms(com_port: str = "COM5"):
                     sms_engine.port.write(b'AT+CSCS="GSM"\r\n')
                     time.sleep(0.2)
                     
-                    # Read all messages
-                    sms_engine.port.write(b'AT+CMGL="ALL"\r\n')
+                    # Read unread messages only
+                    sms_engine.port.write(b'AT+CMGL="REC UNREAD"\r\n')
                     time.sleep(1)
                     
                     # Read response
